@@ -251,6 +251,31 @@ em {
 .cta h2 strong, .cta h2 em { display: block; }
 .cta h2 em { margin-bottom: -0.24em; }
 
+/* ---------- Scroll zoom (front page) ----------
+   With "zoom-on" set, the three sections are stacked in a stage that stays
+   pinned to the viewport while the page scrolls through a tall track.
+   js/site.js turns scroll position into scale and opacity: the current
+   section flies toward the viewer and the next one expands out of the centre.
+   Without the class the sections simply follow one another down the page. */
+.zoom-on .zoom { height: calc((1 + var(--zoom-span, 2.55)) * 100vh); }
+.zoom-on .zoom__stage {
+  position: sticky; top: 0;
+  height: 100vh; height: 100svh;
+  overflow: hidden;
+}
+.zoom-on .zoom__stage > section {
+  position: absolute; inset: 0;
+  display: flex; align-items: center;
+  min-height: 0;
+  padding: 96px var(--gutter) 72px;
+  transform-origin: 50% 50%;
+  will-change: transform, opacity;
+}
+.zoom-on .zoom__stage > section:not(:first-child) { opacity: 0; visibility: hidden; }
+.zoom-on .zoom [data-reveal] { opacity: 1; transform: none; transition: none; }
+.zoom-on .zoom .statements__list li { will-change: transform, opacity; }
+.zoom-on .bg { transform-origin: 50% 50%; }
+
 /* ---------- Reveal on scroll ---------- */
 .js [data-reveal] {
   opacity: 0; transform: translateY(28px);

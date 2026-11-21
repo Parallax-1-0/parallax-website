@@ -807,7 +807,12 @@
     view.tx = e.clientX / W - 0.5;
     view.ty = e.clientY / H - 0.5;
   }, { passive: true });
-  window.addEventListener('scroll', () => { view.scrollTarget = window.scrollY; }, { passive: true });
+  window.addEventListener('scroll', () => {
+    view.scrollTarget = window.scrollY;
+    // The page can change length after load (the front page's zoom track
+    // switches on and off with the viewport), so keep the scroll range current.
+    layout.scrollMax = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+  }, { passive: true });
   document.addEventListener('visibilitychange', () => {
     cancelAnimationFrame(raf);
     last = 0;
