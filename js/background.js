@@ -1,0 +1,820 @@
+/*
+ * Animated backdrop: expanding reasoning graphs, live price series, and
+ * calculations that type themselves out. Everything here is generated
+ * at random for decoration — none of it is real market or fund data.
+ *
+ * Nothing overlaps: the two charts own fixed horizontal bands, and every
+ * graph and formula reserves a rectangle that no other figure may enter.
+ */
+(() => {
+  'use strict';
+
+  const canvas = document.getElementById('bg');
+  if (!canvas || !canvas.getContext) return;
+  const ctx = canvas.getContext('2d');
+
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const intensity = Math.max(0.1, Math.min(1, parseFloat(canvas.dataset.intensity || '1')));
+
+  const MONO = 'ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace';
+  const LABEL_FONT = '10px ' + MONO;
+  // Logo palette as r,g,b triplets.
+  const INK = '245,242,248';
+  const LAV = '211,196,250';
+  const VIOLET = '154,123,232';
+  const DEEP = '107,79,194';
+
+  const PAD = 18;          // minimum gap kept between any two figures
+  const POINTER_PX = 24;   // how far the scene leans toward the pointer
+
+  let W = 0;
+  let H = 0;
+  let now = 0;           // animation clock in seconds (pauses with the tab)
+  let compact = false;   // phone-sized viewport: draw less
+  const view = { px: 0, py: 0, tx: 0, ty: 0, scroll: 0, scrollTarget: 0 };
+
+  // The scene is a little taller than the viewport and slides up as the page
+  // scrolls. `line`, `candles` and `lane` are the regions figures live in.
+  const layout = { w: 0, h: 0, shift: 0, scrollMax: 0, top: 0, bottom: 0, line: null, candles: null, lane: null };
+
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const pick = (arr) => arr[(Math.random() * arr.length) | 0];
+  const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+  const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+  const rgba = (c, a) => 'rgba(' + c + ',' + a.toFixed(3) + ')';
+  const gauss = () => (Math.random() + Math.random() + Math.random() + Math.random() - 2) / 0.577;
+  const signed = (v, d) => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(d);
+
+  // Parallax: nearer layers (larger z) lean further toward the pointer. The
+  // scroll shift is the same for every layer so figures never drift into
+  // each other; PAD absorbs the small pointer-driven differences.
+  const offX = (z) => view.px * POINTER_PX * z;
+  const offY = (z) => view.py * POINTER_PX * z -
+    (layout.scrollMax > 0 ? clamp01(view.scroll / layout.scrollMax) * layout.shift : 0);
+
+  /* ------------------------------------------------------------------ */
+  /* Geometry                                                           */
+  /* ------------------------------------------------------------------ */
+  const rectsHit = (a, b, pad) =>
+    a.x < b.x + b.w + pad && a.x + a.w + pad > b.x && a.y < b.y + b.h + pad && a.y + a.h + pad > b.y;
+
+  const inside = (inner, outer) =>
+    inner.x >= outer.x && inner.y >= outer.y &&
+    inner.x + inner.w <= outer.x + outer.w && inner.y + inner.h <= outer.y + outer.h;
+
+  const pointInRect = (x, y, r, pad) =>
+    x >= r.x - pad && x <= r.x + r.w + pad && y >= r.y - pad && y <= r.y + r.h + pad;
+
+  // True when segment a–b properly crosses segment c–d.
+  const segsCross = (ax, ay, bx, by, cx, cy, dx, dy) => {
+    const d1 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx);
+    const d2 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx);
+    const d3 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    const d4 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax);
+    return (d1 > 0) !== (d2 > 0) && (d3 > 0) !== (d4 > 0);
+  };
+
+  const segHitsRect = (ax, ay, bx, by, r, pad) => {
+    const x0 = r.x - pad;
+    const y0 = r.y - pad;
+    const x1 = r.x + r.w + pad;
+    const y1 = r.y + r.h + pad;
+    if (ax >= x0 && ax <= x1 && ay >= y0 && ay <= y1) return true;
+    if (bx >= x0 && bx <= x1 && by >= y0 && by <= y1) return true;
+    return segsCross(ax, ay, bx, by, x0, y0, x1, y0) || segsCross(ax, ay, bx, by, x1, y0, x1, y1) ||
+           segsCross(ax, ay, bx, by, x1, y1, x0, y1) || segsCross(ax, ay, bx, by, x0, y1, x0, y0);
+  };
+
+  // Digits that have not "resolved" yet flicker through random values.
+  const scramble = (text, progress) => {
+    if (progress >= 1) return text;
+    const settled = Math.floor(text.length * progress);
+    let out = '';
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      out += i >= settled && ch >= '0' && ch <= '9' ? String((Math.random() * 10) | 0) : ch;
+    }
+    return out;
+  };
+
+  /* ------------------------------------------------------------------ */
+  /* Grid                                                               */
+  /* ------------------------------------------------------------------ */
+  const GRID = 88;
+  function drawGrid() {
+    const ox = ((offX(0.2) % GRID) + GRID) % GRID;
+    const oy = ((offY(0.2) % GRID) + GRID) % GRID;
+    ctx.beginPath();
+    for (let x = ox; x < W; x += GRID) { ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, H); }
+    for (let y = oy; y < H; y += GRID) { ctx.moveTo(0, y + 0.5); ctx.lineTo(W, y + 0.5); }
+    ctx.strokeStyle = rgba(LAV, 0.04);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Price series (random walks)                                        */
+  /* ------------------------------------------------------------------ */
+  const CHART_Z = 0.5;
+  // `revert` pulls a series back toward 100 so its range stays tight enough
+  // for individual candles to be visible.
+  const nextPrice = (v, s) => Math.max(5, v * (1 + s.drift + s.vol * gauss()) + (s.revert || 0) * (100 - v));
+  const capacity = (s) => Math.max(8, Math.ceil((W * (compact ? s.headCompact : s.head) + 40) / s.step));
+
+  // The part of a chart's band the series is drawn in; the margins leave
+  // room for its readouts so they stay inside the band too.
+  const plotArea = (band) => ({ top: band.y + 22, h: Math.max(20, band.h - 44), floor: band.y + band.h - 2 });
+
+  // Follow the visible range smoothly, but never let a value fall outside it.
+  function trackRange(s, lo, hi, dt) {
+    const pad = Math.max((hi - lo) * 0.08, 0.3);
+    const k = Math.min(1, dt * 1.5);
+    s.lo = Math.min(s.lo + (lo - pad - s.lo) * k, lo);
+    s.hi = Math.max(s.hi + (hi + pad - s.hi) * k, hi);
+  }
+
+  function updateLine(s, dt) {
+    s.frac += dt / s.interval;
+    while (s.frac >= 1) {
+      s.frac -= 1;
+      s.pts.push(s.next);
+      s.next = nextPrice(s.next, s);
+    }
+    const cap = capacity(s);
+    while (s.pts.length > cap) s.pts.shift();
+
+    let lo = s.next;
+    let hi = s.next;
+    for (let i = 0; i < s.pts.length; i++) {
+      if (s.pts[i] < lo) lo = s.pts[i];
+      if (s.pts[i] > hi) hi = s.pts[i];
+    }
+    trackRange(s, lo, hi, dt);
+  }
+
+  function drawLine(s) {
+    const n = s.pts.length;
+    const full = n >= capacity(s);
+    const ox = offX(CHART_Z) - 40;
+    const oy = offY(CHART_Z);
+    const area = plotArea(layout.line);
+    const yOf = (v) => area.top + oy + area.h * (1 - (v - s.lo) / (s.hi - s.lo));
+    const shift = full ? s.frac : 0;
+
+    const last = s.pts[n - 1];
+    const live = last + (s.next - last) * s.frac;
+    const hx = (n - 1 - shift + s.frac) * s.step + ox;
+    const hy = yOf(live);
+    const x0 = -shift * s.step + ox;
+
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const x = (i - shift) * s.step + ox;
+      const y = yOf(s.pts[i]);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.lineTo(hx, hy);
+    ctx.strokeStyle = rgba(s.color, s.alpha);
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    const floor = area.floor + oy;
+    ctx.lineTo(hx, floor);
+    ctx.lineTo(x0, floor);
+    ctx.closePath();
+    const g = ctx.createLinearGradient(0, area.top + oy, 0, floor);
+    g.addColorStop(0, rgba(s.color, s.alpha * 0.24));
+    g.addColorStop(1, rgba(s.color, 0));
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    // Last-price guide, head marker, and readout.
+    ctx.beginPath();
+    ctx.setLineDash([2, 6]);
+    ctx.moveTo(hx + 6, hy + 0.5);
+    ctx.lineTo(W, hy + 0.5);
+    ctx.strokeStyle = rgba(s.color, s.alpha * 0.45);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const pulse = 0.5 + 0.5 * Math.sin(now * 3);
+    ctx.beginPath();
+    ctx.arc(hx, hy, 7 + pulse * 5, 0, Math.PI * 2);
+    ctx.fillStyle = rgba(s.color, s.alpha * 0.16);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(hx, hy, 2.6, 0, Math.PI * 2);
+    ctx.fillStyle = rgba(INK, Math.min(1, s.alpha * 1.6));
+    ctx.fill();
+
+    const change = (live / s.pts[0] - 1) * 100;
+    ctx.font = '11px ' + MONO;
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = rgba(INK, Math.min(1, s.alpha * 1.2));
+    ctx.fillText(live.toFixed(2), hx + 12, hy - 9);
+    ctx.fillStyle = rgba(LAV, s.alpha);
+    ctx.fillText(signed(change, 2) + '%', hx + 12, hy + 16);
+  }
+
+  function updateCandles(s, dt) {
+    s.tick += dt;
+    if (s.tick > 0.07) {
+      s.tick = 0;
+      const b = s.bars[s.bars.length - 1];
+      b.c = nextPrice(b.c, s);
+      if (b.c > b.h) b.h = b.c;
+      if (b.c < b.l) b.l = b.c;
+    }
+    s.frac += dt / s.interval;
+    while (s.frac >= 1) {
+      s.frac -= 1;
+      const c = s.bars[s.bars.length - 1].c;
+      s.bars.push({ o: c, h: c, l: c, c: c });
+    }
+    const cap = capacity(s);
+    while (s.bars.length > cap) s.bars.shift();
+
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let i = 0; i < s.bars.length; i++) {
+      if (s.bars[i].l < lo) lo = s.bars[i].l;
+      if (s.bars[i].h > hi) hi = s.bars[i].h;
+    }
+    trackRange(s, lo, hi, dt);
+  }
+
+  function drawCandles(s) {
+    const n = s.bars.length;
+    const full = n >= capacity(s);
+    const ox = offX(CHART_Z) - 40;
+    const oy = offY(CHART_Z);
+    const area = plotArea(layout.candles);
+    const yOf = (v) => area.top + oy + area.h * (1 - (v - s.lo) / (s.hi - s.lo));
+    const shift = full ? s.frac : 0;
+    const bodyW = Math.max(3, s.step * 0.46);
+
+    ctx.lineWidth = 1;
+    for (let i = 0; i < n; i++) {
+      const b = s.bars[i];
+      const x = Math.round((i - shift) * s.step + ox) + 0.5;
+      const up = b.c >= b.o;
+      const color = up ? LAV : DEEP;
+      const a = s.alpha * (up ? 0.85 : 1);
+      ctx.strokeStyle = rgba(color, a);
+      ctx.beginPath();
+      ctx.moveTo(x, yOf(b.h));
+      ctx.lineTo(x, yOf(b.l));
+      ctx.stroke();
+      const top = yOf(Math.max(b.o, b.c));
+      const height = Math.max(1, yOf(Math.min(b.o, b.c)) - top);
+      ctx.fillStyle = rgba(color, a);
+      ctx.fillRect(x - bodyW / 2, top, bodyW, height);
+    }
+
+    // Moving average over the closes — one of the "calculations".
+    const WINDOW = 9;
+    if (n > WINDOW) {
+      let sum = 0;
+      ctx.beginPath();
+      for (let i = 0; i < n; i++) {
+        sum += s.bars[i].c;
+        if (i >= WINDOW) sum -= s.bars[i - WINDOW].c;
+        if (i < WINDOW - 1) continue;
+        const x = (i - shift) * s.step + ox;
+        const y = yOf(sum / WINDOW);
+        if (i === WINDOW - 1) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = rgba(VIOLET, s.alpha * 1.1);
+      ctx.lineWidth = 1.25;
+      ctx.stroke();
+
+      const lx = (n - 1 - shift) * s.step + ox + 16;
+      ctx.font = LABEL_FONT;
+      ctx.fillStyle = rgba(VIOLET, Math.min(1, s.alpha * 1.6));
+      ctx.fillText('MA(' + WINDOW + ') ' + (sum / WINDOW).toFixed(2), lx, yOf(sum / WINDOW) - 6);
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Expanding graphs                                                   */
+  /* ------------------------------------------------------------------ */
+  const clusters = [];
+  const floaters = [];
+
+  const LABELS = [
+    () => rand(0, 1).toFixed(4),
+    () => signed(rand(-4, 6), 2) + '%',
+    () => rand(10, 480).toFixed(2),
+    () => 'p=' + rand(0.5, 0.99).toFixed(2),
+    () => 'w=' + rand(0.01, 0.2).toFixed(3),
+  ];
+
+  // Is this rectangle clear of both chart bands and every other figure?
+  function isFree(rect) {
+    if (rectsHit(rect, layout.line, PAD) || rectsHit(rect, layout.candles, PAD)) return false;
+    for (let i = 0; i < clusters.length; i++) if (rectsHit(rect, clusters[i].rect, PAD)) return false;
+    for (let i = 0; i < floaters.length; i++) if (rectsHit(rect, floaters[i].rect, PAD)) return false;
+    return true;
+  }
+
+  const wantedClusters = () => (compact ? 2 : Math.max(2, Math.min(5, Math.floor(layout.lane.w / 420))));
+
+  // Claim a free square in the lane between the two charts and plant a root.
+  function seedCluster() {
+    const lane = layout.lane;
+    const maxR = Math.min(compact ? 88 : 165, lane.h / 2, lane.w / 2);
+    const minR = Math.min(compact ? 56 : 90, maxR);
+    if (maxR < 40) return false;
+    const TRIES = 14;
+    for (let i = 0; i < TRIES; i++) {
+      const R = maxR - (maxR - minR) * (i / (TRIES - 1));
+      const cx = rand(lane.x + R, lane.x + lane.w - R);
+      const cy = rand(lane.y + R, lane.y + lane.h - R);
+      const rect = { x: cx - R, y: cy - R, w: R * 2, h: R * 2 };
+      if (!isFree(rect)) continue;
+      const c = {
+        z: rand(0.6, 1),
+        cx, cy, R, rect,
+        nodes: [],
+        edges: [],
+        labels: [],
+        pulses: [],
+        state: 'grow',
+        t: 0,
+        spawnIn: 0,
+        pulseIn: rand(0.4, 1.2),
+        misses: 0,
+        max: Math.round(R / (compact ? 6.5 : 7.5)),
+        gap: Math.max(22, R * 0.19),
+        hold: rand(3.5, 6.5),
+        alpha: 1,
+      };
+      c.nodes.push({
+        x: cx, y: cy, gen: 0, kids: 0, angle: 0,
+        born: now, parent: null, phase: rand(0, 6.28), r: 3.4, label: null, hit: -10,
+      });
+      clusters.push(c);
+      return true;
+    }
+    return false;
+  }
+
+  // Would a new edge p→(x, y) run through another edge or a label?
+  function edgeBlocked(c, a, bx, by, b) {
+    for (let i = 0; i < c.edges.length; i++) {
+      const e = c.edges[i];
+      if (e.a === a || e.b === a || e.a === b || e.b === b) continue;
+      if (segsCross(a.x, a.y, bx, by, e.a.x, e.a.y, e.b.x, e.b.y)) return true;
+    }
+    for (let i = 0; i < c.labels.length; i++) {
+      if (segHitsRect(a.x, a.y, bx, by, c.labels[i].rect, 3)) return true;
+    }
+    return false;
+  }
+
+  // Find a spot beside the node where its value fits without touching anything.
+  function placeLabel(c, n, text) {
+    ctx.font = LABEL_FONT;
+    const w = Math.ceil(ctx.measureText(text).width) + 2;
+    const h = 13;
+    const spots = [
+      { x: n.x + 8, y: n.y - 17 }, { x: n.x - 8 - w, y: n.y - 17 },
+      { x: n.x + 8, y: n.y + 5 }, { x: n.x - 8 - w, y: n.y + 5 },
+    ];
+    for (let s = 0; s < spots.length; s++) {
+      const rect = { x: spots[s].x, y: spots[s].y, w, h };
+      if (!inside(rect, c.rect)) continue;
+      if (c.labels.some((l) => rectsHit(rect, l.rect, 5))) continue;
+      if (c.nodes.some((m) => m !== n && pointInRect(m.x, m.y, rect, 8))) continue;
+      if (c.edges.some((e) => segHitsRect(e.a.x, e.a.y, e.b.x, e.b.y, rect, 3))) continue;
+      n.label = { text, dx: rect.x - n.x, dy: rect.y - n.y + 10 };
+      c.labels.push({ node: n, rect });
+      return;
+    }
+  }
+
+  function growCluster(c) {
+    const open = c.nodes.filter((n) => n.born <= now && n.gen < 4 && n.kids < (n.gen === 0 ? 5 : n.gen === 1 ? 3 : 2));
+    if (!open.length) { c.misses++; return; }
+    const p = pick(open);
+    const limit = (c.R - 8) * (c.R - 8);
+    for (let tries = 0; tries < 8; tries++) {
+      const angle = p.gen === 0 ? rand(0, Math.PI * 2) : p.angle + rand(-1, 1);
+      const dist = rand(0.3, 0.58) * c.R * (1 - p.gen * 0.12);
+      const x = p.x + Math.cos(angle) * dist;
+      const y = p.y + Math.sin(angle) * dist;
+      if ((x - c.cx) * (x - c.cx) + (y - c.cy) * (y - c.cy) > limit) continue;
+      if (c.nodes.some((n) => (n.x - x) * (n.x - x) + (n.y - y) * (n.y - y) < c.gap * c.gap)) continue;
+      if (c.labels.some((l) => pointInRect(x, y, l.rect, 8))) continue;
+      if (edgeBlocked(c, p, x, y, null)) continue;
+      const dur = rand(0.35, 0.65);
+      const child = {
+        x, y, gen: p.gen + 1, kids: 0, angle,
+        born: now + dur, parent: p, phase: rand(0, 6.28),
+        r: Math.max(1.5, 2.9 - p.gen * 0.45),
+        label: null, hit: -10,
+      };
+      p.kids++;
+      c.nodes.push(child);
+      c.edges.push({ a: p, b: child, born: now, dur, cross: false });
+      if (Math.random() < 0.34) placeLabel(c, child, pick(LABELS)());
+      c.misses = 0;
+      return;
+    }
+    c.misses++;
+  }
+
+  // When a graph stops branching, link a few nearby nodes across branches.
+  function crossLink(c) {
+    let added = 0;
+    const reach = c.R * 0.9;
+    for (let i = 0; i < 60 && added < 3; i++) {
+      const a = pick(c.nodes);
+      const b = pick(c.nodes);
+      if (a === b || a.parent === b || b.parent === a) continue;
+      if ((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) > reach * reach) continue;
+      if (c.edges.some((e) => (e.a === a && e.b === b) || (e.a === b && e.b === a))) continue;
+      if (edgeBlocked(c, a, b.x, b.y, b)) continue;
+      c.edges.push({ a, b, born: now, dur: 0.7, cross: true });
+      added++;
+    }
+  }
+
+  function updateCluster(c, dt) {
+    if (c.state === 'grow') {
+      c.spawnIn -= dt;
+      if (c.spawnIn <= 0) {
+        growCluster(c);
+        c.spawnIn = rand(0.1, 0.34);
+      }
+      if (c.nodes.length >= c.max || c.misses > 10) {
+        c.state = 'hold';
+        c.t = 0;
+        crossLink(c);
+      }
+    } else if (c.state === 'hold') {
+      c.t += dt;
+      if (c.t > c.hold) c.state = 'fade';
+    } else {
+      c.alpha -= dt / 1.6;
+    }
+
+    // Signals travel outward from the root along finished edges.
+    c.pulseIn -= dt;
+    if (c.pulseIn <= 0) {
+      c.pulseIn = rand(0.35, 1.1);
+      const first = c.edges.filter((e) => e.a === c.nodes[0] && now - e.born >= e.dur);
+      if (first.length) c.pulses.push({ edge: pick(first), t: 0 });
+    }
+    for (let i = c.pulses.length - 1; i >= 0; i--) {
+      const p = c.pulses[i];
+      p.t += dt / 0.55;
+      if (p.t < 1) continue;
+      p.edge.b.hit = now;
+      const onward = c.edges.filter((e) => e.a === p.edge.b && !e.cross && now - e.born >= e.dur);
+      if (onward.length && Math.random() < 0.85) { p.edge = pick(onward); p.t = 0; } else c.pulses.splice(i, 1);
+    }
+  }
+
+  function drawCluster(c) {
+    const ox = offX(c.z);
+    const oy = offY(c.z);
+    const depth = (0.45 + 0.55 * c.z) * Math.max(0, c.alpha);
+    const px = (n) => n.x + Math.sin(now * 0.5 + n.phase) * 2 + ox;
+    const py = (n) => n.y + Math.cos(now * 0.4 + n.phase) * 2 + oy;
+
+    ctx.lineWidth = 1;
+    for (let i = 0; i < c.edges.length; i++) {
+      const e = c.edges[i];
+      const p = easeOut(clamp01((now - e.born) / e.dur));
+      const ax = px(e.a);
+      const ay = py(e.a);
+      const bx = ax + (px(e.b) - ax) * p;
+      const by = ay + (py(e.b) - ay) * p;
+      ctx.beginPath();
+      if (e.cross) ctx.setLineDash([3, 5]);
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.strokeStyle = rgba(e.cross ? VIOLET : LAV, (e.cross ? 0.3 : 0.26) * depth);
+      ctx.stroke();
+      if (e.cross) ctx.setLineDash([]);
+      if (p < 1) {
+        ctx.beginPath();
+        ctx.arc(bx, by, 2, 0, Math.PI * 2);
+        ctx.fillStyle = rgba(INK, 0.9 * depth);
+        ctx.fill();
+      }
+    }
+
+    for (let i = 0; i < c.pulses.length; i++) {
+      const p = c.pulses[i];
+      const ax = px(p.edge.a);
+      const ay = py(p.edge.a);
+      const x = ax + (px(p.edge.b) - ax) * p.t;
+      const y = ay + (py(p.edge.b) - ay) * p.t;
+      ctx.beginPath();
+      ctx.arc(x, y, 6, 0, Math.PI * 2);
+      ctx.fillStyle = rgba(VIOLET, 0.22 * depth);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x, y, 1.8, 0, Math.PI * 2);
+      ctx.fillStyle = rgba(INK, 0.95 * depth);
+      ctx.fill();
+    }
+
+    ctx.font = LABEL_FONT;
+    ctx.textBaseline = 'alphabetic';
+    for (let i = 0; i < c.nodes.length; i++) {
+      const n = c.nodes[i];
+      const age = now - n.born;
+      if (age < 0) continue;
+      const x = px(n);
+      const y = py(n);
+      const grow = easeOut(clamp01(age / 0.3));
+
+      if (age < 0.9) {
+        ctx.beginPath();
+        ctx.arc(x, y, n.r + 12 * (age / 0.9), 0, Math.PI * 2);
+        ctx.strokeStyle = rgba(LAV, 0.5 * (1 - age / 0.9) * depth);
+        ctx.stroke();
+      }
+      const sinceHit = now - n.hit;
+      if (sinceHit < 0.5) {
+        ctx.beginPath();
+        ctx.arc(x, y, n.r + 6, 0, Math.PI * 2);
+        ctx.fillStyle = rgba(VIOLET, 0.35 * (1 - sinceHit / 0.5) * depth);
+        ctx.fill();
+      }
+      if (n.gen === 0) {
+        ctx.beginPath();
+        ctx.arc(x, y, 9, 0, Math.PI * 2);
+        ctx.fillStyle = rgba(VIOLET, 0.16 * depth);
+        ctx.fill();
+      }
+      ctx.beginPath();
+      ctx.arc(x, y, n.r * grow, 0, Math.PI * 2);
+      ctx.fillStyle = rgba(n.gen === 0 ? INK : LAV, (n.gen === 0 ? 0.95 : 0.8) * depth);
+      ctx.fill();
+
+      if (n.label) {
+        ctx.fillStyle = rgba(LAV, 0.5 * depth * clamp01(age / 0.25));
+        ctx.fillText(scramble(n.label.text, age / 0.7), x + n.label.dx, y + n.label.dy);
+      }
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Calculations that type themselves out                              */
+  /* ------------------------------------------------------------------ */
+  const FORMULAS = [
+    ['E[r] = Σ w·r = ', () => rand(1, 14).toFixed(2) + '%'],
+    ['σ² = Σ(x − μ)² / n = ', () => rand(0.01, 0.09).toFixed(4)],
+    ['β = cov(r, m) / var(m) = ', () => rand(0.6, 1.5).toFixed(3)],
+    ['ρ(a, b) = ', () => signed(rand(-0.9, 0.9), 3)],
+    ['∂V/∂S = ', () => rand(0.1, 0.95).toFixed(4)],
+    ['NPV = Σ CF / (1 + r)^t = ', () => rand(120, 980).toFixed(1)],
+    ['ln(S / K) = ', () => signed(rand(-0.3, 0.3), 4)],
+    ['P(x > k) = ', () => rand(0.02, 0.6).toFixed(3)],
+    ['μ − ½σ² = ', () => signed(rand(-0.02, 0.09), 4)],
+    ['Δ = ', () => signed(rand(-3, 5), 2) + '%'],
+    ['CAGR = (Vn / V0)^(1/n) − 1 = ', () => rand(2, 18).toFixed(2) + '%'],
+    ['z = (x − μ) / σ = ', () => signed(rand(-2.6, 2.6), 2)],
+    ['Σ w = ', () => '1.0000'],
+    ['EV / EBITDA = ', () => rand(6, 22).toFixed(1) + '×'],
+    ['WACC = ', () => rand(5, 11).toFixed(2) + '%'],
+    ['FCF yield = ', () => rand(1.5, 8).toFixed(2) + '%'],
+  ];
+  const FLOAT_Z = 0.3;
+  const TYPE_CPS = 30;
+  const SETTLE = 0.7;
+  const REVISE_AT = 1.5;
+  const HOLD = 2.8;
+  const FADE = 1;
+
+  const floatFont = () => (compact ? 10 : 12) + 'px ' + MONO;
+  let floaterIn = 0.4;
+
+  function spawnFloater() {
+    const f = pick(FORMULAS);
+    const first = f[1]();
+    let second = Math.random() < 0.5 ? f[1]() : null;
+    if (second === first) second = null;
+
+    // Reserve room for the whole line up front, including a revised value.
+    ctx.font = floatFont();
+    const w = Math.ceil(ctx.measureText(f[0] + first + (second ? ' → ' + second : '')).width) + 8;
+    if (w > W - 28) return;
+
+    // Graphs get first claim on the lane while one is still waiting to be placed.
+    const laneReserved = clusters.length < wantedClusters();
+    for (let i = 0; i < 10; i++) {
+      const x = rand(14, W - 14 - w);
+      const y = rand(layout.top + 12, layout.bottom);
+      const rect = { x, y: y - 12, w, h: 16 };
+      if (laneReserved && rectsHit(rect, layout.lane, 0)) continue;
+      if (!isFree(rect)) continue;
+      const typed = f[0].length / TYPE_CPS;
+      floaters.push({
+        rect, x, y,
+        text: f[0], first, second,
+        born: now,
+        typed,
+        life: typed + SETTLE + (second ? REVISE_AT + SETTLE : 0) + HOLD + FADE,
+      });
+      return;
+    }
+  }
+
+  function updateFloaters(dt) {
+    floaterIn -= dt;
+    if (floaterIn <= 0) {
+      floaterIn = rand(0.4, 1);
+      if (floaters.length < (compact ? 5 : 9)) spawnFloater();
+    }
+    for (let i = floaters.length - 1; i >= 0; i--) {
+      if (now - floaters[i].born > floaters[i].life) floaters.splice(i, 1);
+    }
+  }
+
+  function drawFloaters() {
+    const ox = offX(FLOAT_Z);
+    const oy = offY(FLOAT_Z);
+    ctx.font = floatFont();
+    ctx.textBaseline = 'alphabetic';
+    for (let i = 0; i < floaters.length; i++) {
+      const f = floaters[i];
+      const age = now - f.born;
+      const a = clamp01((f.life - age) / FADE);
+      const x = f.x + ox;
+      const y = f.y + oy;
+
+      const shown = f.text.slice(0, Math.floor(age * TYPE_CPS));
+      ctx.fillStyle = rgba(LAV, 0.42 * a);
+      ctx.fillText(shown, x, y);
+      let cursor = x + ctx.measureText(shown).width;
+
+      const t1 = age - f.typed;
+      if (t1 < 0) {
+        if (Math.floor(now * 2.5) % 2 === 0) ctx.fillRect(cursor + 1, y - 9, 5, 11);
+        continue;
+      }
+      const revising = f.second !== null && t1 > SETTLE + REVISE_AT;
+      const firstText = scramble(f.first, t1 / SETTLE);
+      ctx.fillStyle = rgba(INK, (revising ? 0.38 : 0.78) * a);
+      ctx.fillText(firstText, cursor, y);
+      if (revising) {
+        cursor += ctx.measureText(firstText).width;
+        ctx.fillStyle = rgba(VIOLET, 0.8 * a);
+        ctx.fillText(' → ', cursor, y);
+        cursor += ctx.measureText(' → ').width;
+        ctx.fillStyle = rgba(INK, 0.82 * a);
+        ctx.fillText(scramble(f.second, (t1 - SETTLE - REVISE_AT) / SETTLE), cursor, y);
+      }
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Scene                                                              */
+  /* ------------------------------------------------------------------ */
+  const line = {
+    pts: [100], next: 100.4, frac: 0, lo: 99, hi: 101,
+    step: 9, interval: 0.11, head: 0.84, headCompact: 0.76,
+    drift: 0.0006, vol: 0.011, color: VIOLET, alpha: 0.6,
+  };
+  const candles = {
+    bars: [{ o: 100, h: 100, l: 100, c: 100 }], frac: 0, tick: 0, lo: 98, hi: 102,
+    step: 18, interval: 0.9, head: 0.9, headCompact: 0.7,
+    drift: 0, vol: 0.006, revert: 0.02, alpha: 0.42,
+  };
+  let seedIn = 0;
+
+  // Carve the scene into the regions each kind of figure may use.
+  function computeLayout() {
+    const scrollMax = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    layout.scrollMax = scrollMax;
+    layout.shift = Math.min(H * 0.12, scrollMax * 0.08);
+    layout.w = W;
+    layout.h = H + layout.shift;
+    const Hw = layout.h;
+    layout.top = Math.max(84, Hw * 0.1);     // keeps figures clear of the header
+    layout.bottom = Hw - 14;
+    layout.line = { x: -80, y: Hw * 0.17, w: W + 160, h: Hw * 0.16 };
+    layout.candles = { x: -80, y: Hw * 0.73, w: W + 160, h: Hw * 0.17 };
+    const laneTop = Hw * 0.33 + PAD;
+    layout.lane = { x: 14, y: laneTop, w: W - 28, h: Hw * 0.73 - PAD - laneTop };
+  }
+
+  function update(dt) {
+    view.px += (view.tx - view.px) * Math.min(1, dt * 3);
+    view.py += (view.ty - view.py) * Math.min(1, dt * 3);
+    view.scroll += (view.scrollTarget - view.scroll) * Math.min(1, dt * 8);
+
+    updateLine(line, dt);
+    updateCandles(candles, dt);
+
+    for (let i = clusters.length - 1; i >= 0; i--) {
+      updateCluster(clusters[i], dt);
+      if (clusters[i].alpha <= 0) clusters.splice(i, 1);
+    }
+    if (clusters.length < wantedClusters()) {
+      seedIn -= dt;
+      if (seedIn <= 0) seedIn = seedCluster() ? rand(0.5, 1.4) : 0.4;
+    }
+
+    updateFloaters(dt);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    ctx.globalAlpha = intensity;
+    drawGrid();
+    drawLine(line);
+    drawCandles(candles);
+    for (let i = 0; i < clusters.length; i++) drawCluster(clusters[i]);
+    drawFloaters();
+    ctx.globalAlpha = 1;
+  }
+
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    // Phone browsers resize constantly as their toolbars slide; only a real
+    // change of shape is worth re-planning the scene for.
+    const replan = w !== layout.w || Math.abs(h + layout.shift - layout.h) > 120 || !layout.lane;
+    W = w;
+    H = h;
+    compact = W < 720;
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (replan) {
+      computeLayout();
+      clusters.length = 0;
+      floaters.length = 0;
+    }
+    if (reduceMotion && started) {
+      for (let i = 0; i < 900; i++) { now += 0.016; update(0.016); }
+      draw();
+    }
+  }
+
+  // Give the charts some history up front so they are already part-way
+  // across the screen on load, then keep drawing themselves from there.
+  function prefill() {
+    const points = Math.floor(capacity(line) * 0.45);
+    for (let i = 0; i < points; i++) { line.pts.push(line.next); line.next = nextPrice(line.next, line); }
+    const bars = Math.floor(capacity(candles) * 0.6);
+    for (let i = 0; i < bars; i++) {
+      const b = candles.bars[candles.bars.length - 1];
+      for (let k = 0; k < 12; k++) {
+        b.c = nextPrice(b.c, candles);
+        if (b.c > b.h) b.h = b.c;
+        if (b.c < b.l) b.l = b.c;
+      }
+      candles.bars.push({ o: b.c, h: b.c, l: b.c, c: b.c });
+    }
+  }
+
+  let started = false;
+  let raf = 0;
+  let last = 0;
+  function frame(ts) {
+    const t = ts / 1000;
+    const dt = Math.min(0.05, last ? t - last : 0.016);
+    last = t;
+    now += dt;
+    update(dt);
+    draw();
+    raf = requestAnimationFrame(frame);
+  }
+
+  window.addEventListener('resize', resize);
+  resize();
+  prefill();
+  started = true;
+
+  if (reduceMotion) {
+    // No motion requested: build up a settled scene and show a single still frame.
+    for (let i = 0; i < 900; i++) { now += 0.016; update(0.016); }
+    draw();
+    return;
+  }
+
+  window.addEventListener('pointermove', (e) => {
+    view.tx = e.clientX / W - 0.5;
+    view.ty = e.clientY / H - 0.5;
+  }, { passive: true });
+  window.addEventListener('scroll', () => { view.scrollTarget = window.scrollY; }, { passive: true });
+  document.addEventListener('visibilitychange', () => {
+    cancelAnimationFrame(raf);
+    last = 0;
+    if (!document.hidden) raf = requestAnimationFrame(frame);
+  });
+
+  // Start with a little history so the first frame is not empty.
+  for (let i = 0; i < 240; i++) { now += 0.016; update(0.016); }
+  raf = requestAnimationFrame(frame);
+})();

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Parallax Fund</title>
+  <meta name="description" content="Parallax Fund — Reimagining the investment frontier">
+  <meta name="theme-color" content="#000000">
+  <link rel="icon" type="image/svg+xml" href="assets/parallax-fund-mark.svg">
+  <link rel="apple-touch-icon" href="assets/parallax-fund-mark-on-black.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script>document.documentElement.className = "js";</script>
+</head>
+<body class="page-home">
+  <canvas id="bg" class="bg" aria-hidden="true"></canvas>
+  <div class="scrim" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="brand" href="index.html" aria-label="Parallax Fund — home">
+      <img class="brand__mark" src="assets/parallax-fund-mark.svg" alt="" width="90" height="112">
+      <span class="brand__word"><img src="assets/parallax-fund-wordmark.svg" alt="" width="780" height="104"></span>
+    </a>
+    <nav aria-label="Primary">
+      <a class="nav-link" href="contact.html">Contact</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" aria-label="Introduction">
+      <div class="wrap">
+        <h1 class="visually-hidden">Parallax Fund</h1>
+
+        <div class="phrases" id="phrases">
+          <p class="phrase is-active">
+            <span class="phrase__line phrase__line--a">Reimagining the</span>
+            <span class="phrase__line phrase__line--b">investment frontier</span>
+          </p>
+          <p class="phrase" aria-hidden="true">
+            <span class="phrase__line phrase__line--a">No black boxes,</span>
+            <span class="phrase__line phrase__line--b">just reasoning</span>
+          </p>
+          <p class="phrase" aria-hidden="true">
+            <span class="phrase__line phrase__line--a">Beyond intuition,</span>
+            <span class="phrase__line phrase__line--b">into intelligence</span>
+          </p>
+        </div>
+
+        <div class="hero__foot">
+          <div class="ticks" id="ticks" role="group" aria-label="Choose catchphrase">
+            <button class="tick is-current" type="button" aria-label="Show catchphrase 1"><span></span></button>
+            <button class="tick" type="button" aria-label="Show catchphrase 2"><span></span></button>
+            <button class="tick" type="button" aria-label="Show catchphrase 3"><span></span></button>
+          </div>
+          <a class="btn" href="contact.html">Get in touch <span class="btn__arrow" aria-hidden="true">→</span></a>
+        </div>
+      </div>
+
+      <a class="scroll-cue" href="#principles"><span>Scroll</span><i aria-hidden="true"></i></a>
+    </section>
+
+    <section class="statements" id="principles" aria-label="What we stand for">
+      <div class="wrap">
+        <ol class="statements__list">
+          <li data-reveal>
+            <span class="statements__num">01</span>
+            <p><strong>Reimagining the</strong> <em>investment frontier</em></p>
+          </li>
+          <li data-reveal>
+            <span class="statements__num">02</span>
+            <p><strong>No black boxes,</strong> <em>just reasoning</em></p>
+          </li>
+          <li data-reveal>
+            <span class="statements__num">03</span>
+            <p><strong>Beyond intuition,</strong> <em>into intelligence</em></p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="cta" aria-label="Contact">
+      <div class="wrap" data-reveal>
+        <h2><strong>Interested?</strong> <em>Let’s talk.</em></h2>
+        <a class="btn" href="contact.html">Contact us <span class="btn__arrow" aria-hidden="true">→</span></a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <span>© 2026 Parallax Fund</span>
+    <a href="contact.html">Contact</a>
+  </footer>
+
+  <script src="js/background.js" defer></script>
+  <script src="js/site.js" defer></script>
+</body>
+</html>
