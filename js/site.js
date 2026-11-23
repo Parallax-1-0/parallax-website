@@ -3,7 +3,7 @@
 
   // Address the contact form sends to. The form has no backend: submitting
   // opens the visitor's email app with the message pre-filled to this address.
-  const CONTACT_EMAIL = 'anshularavind@gmail.com';
+  const CONTACT_EMAIL = 'anshul@parallaxfundai.com';
 
   /* ---- Header: fold the wordmark away once the page is scrolled ---- */
   const SCROLL_THRESHOLD = 48;
