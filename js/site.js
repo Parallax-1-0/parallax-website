@@ -131,7 +131,8 @@
     const easeOut = (t) => 1 - Math.pow(1 - t, 3);
     const smooth = (a, b, v) => { const t = clamp01((v - a) / (b - a)); return t * t * (3 - 2 * t); };
 
-    let active = false;
+    // The inline script in <head> may already have switched the layout on.
+    let active = root.classList.contains('zoom-on');
     let queued = false;
 
     const travel = () => Math.max(1, zoom.offsetHeight - stage.offsetHeight);
@@ -196,8 +197,19 @@
       if (backdrop) backdrop.style.transform = '';
     };
 
+    // A pinned section cannot scroll, so every section's content has to fit the screen.
+    const allFit = () => {
+      const css = getComputedStyle(root);
+      const padding = (parseFloat(css.getPropertyValue('--stage-top')) || 96) +
+                      (parseFloat(css.getPropertyValue('--stage-bottom')) || 72);
+      return panels.every((panel) => {
+        const content = panel.firstElementChild;
+        return !content || content.offsetHeight <= window.innerHeight - padding;
+      });
+    };
+
     const sync = () => {
-      const want = !stillMotion.matches && window.innerHeight >= MIN_HEIGHT;
+      const want = !stillMotion.matches && window.innerHeight >= MIN_HEIGHT && allFit();
       if (want !== active) {
         active = want;
         root.classList.toggle('zoom-on', want);
@@ -210,6 +222,9 @@
     window.__zoomReady = true;
     window.addEventListener('scroll', requestRender, { passive: true });
     window.addEventListener('resize', sync);
+    // Web fonts change how tall the content is, so measure again once they are in.
+    window.addEventListener('load', sync);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(sync);
     if (stillMotion.addEventListener) stillMotion.addEventListener('change', sync);
     sync();
 
