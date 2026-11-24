@@ -18,11 +18,18 @@
 
   const MONO = 'ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace';
   const LABEL_FONT = '10px ' + MONO;
-  // Logo palette as r,g,b triplets.
-  const INK = '245,242,248';
-  const LAV = '211,196,250';
-  const VIOLET = '154,123,232';
-  const DEEP = '107,79,194';
+  // Logo palette as r,g,b triplets, one set per colour theme. On white the
+  // figures use the darker violets, drawn a little stronger (`boost`).
+  const PALETTES = {
+    dark: { ink: '245,242,248', lav: '211,196,250', violet: '154,123,232', up: '211,196,250', down: '107,79,194', boost: 1 },
+    light: { ink: '20,16,31', lav: '107,79,194', violet: '124,92,214', up: '154,123,232', down: '63,37,133', boost: 1.45 },
+  };
+  let INK, LAV, VIOLET, UP, DOWN, BOOST;
+  const usePalette = () => {
+    const p = document.documentElement.getAttribute('data-theme') === 'light' ? PALETTES.light : PALETTES.dark;
+    INK = p.ink; LAV = p.lav; VIOLET = p.violet; UP = p.up; DOWN = p.down; BOOST = p.boost;
+  };
+  usePalette();
 
   const PAD = 18;          // minimum gap kept between any two figures
   const POINTER_PX = 24;   // how far the scene leans toward the pointer
@@ -35,13 +42,15 @@
 
   // The scene is a little taller than the viewport and slides up as the page
   // scrolls. `line`, `candles` and `lane` are the regions figures live in.
-  const layout = { w: 0, h: 0, shift: 0, scrollMax: 0, top: 0, bottom: 0, line: null, candles: null, lane: null };
+  // `left` is where figures may start: further in when the canvas only covers
+  // one side of the page and fades out toward the words beside it.
+  const layout = { w: 0, h: 0, shift: 0, scrollMax: 0, top: 0, bottom: 0, left: 14, line: null, candles: null, lane: null };
 
   const rand = (a, b) => a + Math.random() * (b - a);
   const pick = (arr) => arr[(Math.random() * arr.length) | 0];
   const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
   const easeOut = (t) => 1 - Math.pow(1 - t, 3);
-  const rgba = (c, a) => 'rgba(' + c + ',' + a.toFixed(3) + ')';
+  const rgba = (c, a) => 'rgba(' + c + ',' + Math.min(1, a * BOOST).toFixed(3) + ')';
   const gauss = () => (Math.random() + Math.random() + Math.random() + Math.random() - 2) / 0.577;
   const signed = (v, d) => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(d);
 
@@ -174,7 +183,7 @@
       if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     }
     ctx.lineTo(hx, hy);
-    ctx.strokeStyle = rgba(s.color, s.alpha);
+    ctx.strokeStyle = rgba(VIOLET, s.alpha);
     ctx.lineWidth = 1.5;
     ctx.lineJoin = 'round';
     ctx.stroke();
@@ -184,8 +193,8 @@
     ctx.lineTo(x0, floor);
     ctx.closePath();
     const g = ctx.createLinearGradient(0, area.top + oy, 0, floor);
-    g.addColorStop(0, rgba(s.color, s.alpha * 0.24));
-    g.addColorStop(1, rgba(s.color, 0));
+    g.addColorStop(0, rgba(VIOLET, s.alpha * 0.24));
+    g.addColorStop(1, rgba(VIOLET, 0));
     ctx.fillStyle = g;
     ctx.fill();
 
@@ -194,7 +203,7 @@
     ctx.setLineDash([2, 6]);
     ctx.moveTo(hx + 6, hy + 0.5);
     ctx.lineTo(W, hy + 0.5);
-    ctx.strokeStyle = rgba(s.color, s.alpha * 0.45);
+    ctx.strokeStyle = rgba(VIOLET, s.alpha * 0.45);
     ctx.lineWidth = 1;
     ctx.stroke();
     ctx.setLineDash([]);
@@ -202,7 +211,7 @@
     const pulse = 0.5 + 0.5 * Math.sin(now * 3);
     ctx.beginPath();
     ctx.arc(hx, hy, 7 + pulse * 5, 0, Math.PI * 2);
-    ctx.fillStyle = rgba(s.color, s.alpha * 0.16);
+    ctx.fillStyle = rgba(VIOLET, s.alpha * 0.16);
     ctx.fill();
     ctx.beginPath();
     ctx.arc(hx, hy, 2.6, 0, Math.PI * 2);
@@ -260,7 +269,7 @@
       const b = s.bars[i];
       const x = Math.round((i - shift) * s.step + ox) + 0.5;
       const up = b.c >= b.o;
-      const color = up ? LAV : DEEP;
+      const color = up ? UP : DOWN;
       const a = s.alpha * (up ? 0.85 : 1);
       ctx.strokeStyle = rgba(color, a);
       ctx.beginPath();
@@ -605,12 +614,12 @@
     // Reserve room for the whole line up front, including a revised value.
     ctx.font = floatFont();
     const w = Math.ceil(ctx.measureText(f[0] + first + (second ? ' → ' + second : '')).width) + 8;
-    if (w > W - 28) return;
+    if (w > W - 14 - layout.left) return;
 
     // Graphs get first claim on the lane while one is still waiting to be placed.
     const laneReserved = clusters.length < wantedClusters();
     for (let i = 0; i < 10; i++) {
-      const x = rand(14, W - 14 - w);
+      const x = rand(layout.left, W - 14 - w);
       const y = rand(layout.top + 12, layout.bottom);
       const rect = { x, y: y - 12, w, h: 16 };
       if (laneReserved && rectsHit(rect, layout.lane, 0)) continue;
@@ -681,7 +690,7 @@
   const line = {
     pts: [100], next: 100.4, frac: 0, lo: 99, hi: 101,
     step: 9, interval: 0.11, head: 0.84, headCompact: 0.76,
-    drift: 0.0006, vol: 0.011, color: VIOLET, alpha: 0.6,
+    drift: 0.0006, vol: 0.011, alpha: 0.6,
   };
   const candles = {
     bars: [{ o: 100, h: 100, l: 100, c: 100 }], frac: 0, tick: 0, lo: 98, hi: 102,
@@ -702,8 +711,9 @@
     layout.bottom = Hw - 14;
     layout.line = { x: -80, y: Hw * 0.17, w: W + 160, h: Hw * 0.16 };
     layout.candles = { x: -80, y: Hw * 0.73, w: W + 160, h: Hw * 0.17 };
+    layout.left = W < window.innerWidth - 1 ? Math.round(W * 0.15) : 14;
     const laneTop = Hw * 0.33 + PAD;
-    layout.lane = { x: 14, y: laneTop, w: W - 28, h: Hw * 0.73 - PAD - laneTop };
+    layout.lane = { x: layout.left, y: laneTop, w: W - 14 - layout.left, h: Hw * 0.73 - PAD - laneTop };
   }
 
   function update(dt) {
@@ -739,14 +749,15 @@
 
   function resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    // The canvas may cover only part of the window (the front page keeps it to one side).
+    const w = canvas.clientWidth || window.innerWidth;
+    const h = canvas.clientHeight || window.innerHeight;
     // Phone browsers resize constantly as their toolbars slide; only a real
     // change of shape is worth re-planning the scene for.
     const replan = w !== layout.w || Math.abs(h + layout.shift - layout.h) > 120 || !layout.lane;
     W = w;
     H = h;
-    compact = W < 720;
+    compact = window.innerWidth < 720;
     canvas.width = Math.round(W * dpr);
     canvas.height = Math.round(H * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -796,6 +807,12 @@
   prefill();
   started = true;
 
+  // Recolour when the theme is switched; a still scene needs redrawing by hand.
+  new MutationObserver(() => {
+    usePalette();
+    if (reduceMotion) draw();
+  }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
   if (reduceMotion) {
     // No motion requested: build up a settled scene and show a single still frame.
     for (let i = 0; i < 900; i++) { now += 0.016; update(0.016); }
@@ -804,8 +821,8 @@
   }
 
   window.addEventListener('pointermove', (e) => {
-    view.tx = e.clientX / W - 0.5;
-    view.ty = e.clientY / H - 0.5;
+    view.tx = e.clientX / window.innerWidth - 0.5;
+    view.ty = e.clientY / window.innerHeight - 0.5;
   }, { passive: true });
   window.addEventListener('scroll', () => {
     view.scrollTarget = window.scrollY;

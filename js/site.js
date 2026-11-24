@@ -5,6 +5,42 @@
   // opens the visitor's email app with the message pre-filled to this address.
   const CONTACT_EMAIL = 'anshul@parallaxfundai.com';
 
+  /* ---- Colour theme ----
+     The script in <head> has already set data-theme. A choice made with the
+     toggle is remembered; until one is made the page follows the device. */
+  const root = document.documentElement;
+  const themeToggle = document.getElementById('theme-toggle');
+  const themeMeta = document.querySelector('meta[name="theme-color"]');
+  const deviceLight = window.matchMedia('(prefers-color-scheme: light)');
+
+  const savedTheme = () => {
+    try {
+      const value = localStorage.getItem('theme');
+      return value === 'light' || value === 'dark' ? value : null;
+    } catch (err) {
+      return null;
+    }
+  };
+  const applyTheme = (theme) => {
+    root.setAttribute('data-theme', theme);
+    if (themeMeta) themeMeta.setAttribute('content', theme === 'light' ? '#ffffff' : '#000000');
+    if (themeToggle) themeToggle.setAttribute('aria-label', theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode');
+  };
+  applyTheme(root.getAttribute('data-theme') === 'light' ? 'light' : 'dark');
+
+  if (themeToggle) {
+    themeToggle.addEventListener('click', () => {
+      const next = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+      applyTheme(next);
+      try { localStorage.setItem('theme', next); } catch (err) { /* private mode: the choice lasts for this page only */ }
+    });
+  }
+  if (deviceLight.addEventListener) {
+    deviceLight.addEventListener('change', (event) => {
+      if (!savedTheme()) applyTheme(event.matches ? 'light' : 'dark');
+    });
+  }
+
   /* ---- Header: fold the wordmark away once the page is scrolled ---- */
   const SCROLL_THRESHOLD = 48;
   const onScroll = () => {
@@ -15,14 +51,11 @@
 
   /* ---- Rotating catchphrase ---- */
   const phrases = Array.from(document.querySelectorAll('.phrase'));
-  const ticks = Array.from(document.querySelectorAll('.tick'));
 
   if (phrases.length > 1) {
     const HOLD_MS = 3800;   // how long a phrase stays up
     const SWAP_MS = 640;    // the old phrase is fully gone before the new one starts to rise
     const LEAVE_MS = 800;   // when the leaving phrase can be reset off-stage
-
-    document.documentElement.style.setProperty('--hold', HOLD_MS + 'ms');
 
     // Split each line into words so they can rise in one after another.
     phrases.forEach((phrase) => {
@@ -48,13 +81,6 @@
     let seq = 0;
     let timer = 0;
 
-    const setTick = (n) => {
-      ticks.forEach((t, k) => {
-        t.classList.toggle('is-current', k === n);
-        t.setAttribute('aria-pressed', k === n ? 'true' : 'false');
-      });
-    };
-
     const schedule = () => {
       clearTimeout(timer);
       timer = setTimeout(() => show((index + 1) % phrases.length), HOLD_MS);
@@ -72,7 +98,6 @@
       leaving.setAttribute('aria-hidden', 'true');
       setTimeout(() => { if (!leaving.classList.contains('is-active')) leaving.classList.remove('is-leaving'); }, LEAVE_MS);
 
-      setTick(n);
       setTimeout(() => {
         if (token !== seq) return;
         entering.classList.remove('is-leaving');
@@ -83,14 +108,10 @@
       schedule();
     };
 
-    ticks.forEach((t, k) => t.addEventListener('click', () => show(k)));
-
     // Play the first phrase in rather than starting with it already on screen.
     phrases[0].classList.remove('is-active');
-    setTick(-1);
     requestAnimationFrame(() => requestAnimationFrame(() => {
       phrases[0].classList.add('is-active');
-      setTick(0);
       schedule();
     }));
   }
@@ -99,7 +120,6 @@
   const zoom = document.getElementById('zoom');
   const stage = zoom && zoom.querySelector('.zoom__stage');
   if (zoom && stage) {
-    const root = document.documentElement;
     const backdrop = document.getElementById('bg');
     const panels = Array.from(stage.children).filter((el) => el.tagName === 'SECTION');
     const stillMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
