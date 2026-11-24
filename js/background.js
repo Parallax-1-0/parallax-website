@@ -3,8 +3,12 @@
  * calculations that type themselves out. Everything here is generated
  * at random for decoration — none of it is real market or fund data.
  *
- * Nothing overlaps: the two charts own fixed horizontal bands, and every
+ * Nothing overlaps: the chart owns a fixed horizontal band, and every
  * graph and formula reserves a rectangle that no other figure may enter.
+ *
+ * A canvas marked data-side="right" keeps its figures to the right half on
+ * wide screens, leaving the left to the page's words, with only a small
+ * graph and a formula there while the page is at the top.
  */
 (() => {
   'use strict';
@@ -15,6 +19,7 @@
 
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const intensity = Math.max(0.1, Math.min(1, parseFloat(canvas.dataset.intensity || '1')));
+  const sided = canvas.dataset.side === 'right';
 
   const MONO = 'ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace';
   const LABEL_FONT = '10px ' + MONO;
@@ -41,10 +46,14 @@
   const view = { px: 0, py: 0, tx: 0, ty: 0, scroll: 0, scrollTarget: 0 };
 
   // The scene is a little taller than the viewport and slides up as the page
-  // scrolls. `line`, `candles` and `lane` are the regions figures live in.
-  // `left` is where figures may start: further in when the canvas only covers
-  // one side of the page and fades out toward the words beside it.
-  const layout = { w: 0, h: 0, shift: 0, scrollMax: 0, top: 0, bottom: 0, left: 14, line: null, candles: null, lane: null };
+  // scrolls. `chart` and `lane` are the regions figures live in. In the split
+  // layout figures start at `left`, and `leftNote` / `leftLane` are the two
+  // small areas beside the words (above and below them) that may hold one.
+  const layout = {
+    w: 0, h: 0, shift: 0, scrollMax: 0, top: 0, bottom: 0,
+    split: false, left: 14, chartX: 0, chart: null, lane: null, leftNote: null, leftLane: null,
+  };
+  const LEFT_ALPHA = 0.6;   // figures beside the words are drawn fainter
 
   const rand = (a, b) => a + Math.random() * (b - a);
   const pick = (arr) => arr[(Math.random() * arr.length) | 0];
@@ -58,8 +67,11 @@
   // scroll shift is the same for every layer so figures never drift into
   // each other; PAD absorbs the small pointer-driven differences.
   const offX = (z) => view.px * POINTER_PX * z;
-  const offY = (z) => view.py * POINTER_PX * z -
-    (layout.scrollMax > 0 ? clamp01(view.scroll / layout.scrollMax) * layout.shift : 0);
+  // Pinned figures (the ones beside the words) do not take the scroll shift.
+  const offY = (z, pinned) => view.py * POINTER_PX * z -
+    (!pinned && layout.scrollMax > 0 ? clamp01(view.scroll / layout.scrollMax) * layout.shift : 0);
+  // ...and fade away as soon as the page starts to scroll.
+  const pinnedAlpha = () => LEFT_ALPHA * (1 - clamp01(view.scroll / (H * 0.3)));
 
   /* ------------------------------------------------------------------ */
   /* Geometry                                                           */
@@ -125,12 +137,13 @@
   /* Price series (random walks)                                        */
   /* ------------------------------------------------------------------ */
   const CHART_Z = 0.5;
-  // `revert` pulls a series back toward 100 so its range stays tight enough
+  // `revert` pulls the series back toward 100 so its range stays tight enough
   // for individual candles to be visible.
   const nextPrice = (v, s) => Math.max(5, v * (1 + s.drift + s.vol * gauss()) + (s.revert || 0) * (100 - v));
-  const capacity = (s) => Math.max(8, Math.ceil((W * (compact ? s.headCompact : s.head) + 40) / s.step));
+  const capacity = (s) =>
+    Math.max(8, Math.ceil(((W - layout.chartX) * (compact ? s.headCompact : s.head) + 40) / s.step));
 
-  // The part of a chart's band the series is drawn in; the margins leave
+  // The part of the chart's band the series is drawn in; the margins leave
   // room for its readouts so they stay inside the band too.
   const plotArea = (band) => ({ top: band.y + 22, h: Math.max(20, band.h - 44), floor: band.y + band.h - 2 });
 
@@ -142,92 +155,7 @@
     s.hi = Math.max(s.hi + (hi + pad - s.hi) * k, hi);
   }
 
-  function updateLine(s, dt) {
-    s.frac += dt / s.interval;
-    while (s.frac >= 1) {
-      s.frac -= 1;
-      s.pts.push(s.next);
-      s.next = nextPrice(s.next, s);
-    }
-    const cap = capacity(s);
-    while (s.pts.length > cap) s.pts.shift();
-
-    let lo = s.next;
-    let hi = s.next;
-    for (let i = 0; i < s.pts.length; i++) {
-      if (s.pts[i] < lo) lo = s.pts[i];
-      if (s.pts[i] > hi) hi = s.pts[i];
-    }
-    trackRange(s, lo, hi, dt);
-  }
-
-  function drawLine(s) {
-    const n = s.pts.length;
-    const full = n >= capacity(s);
-    const ox = offX(CHART_Z) - 40;
-    const oy = offY(CHART_Z);
-    const area = plotArea(layout.line);
-    const yOf = (v) => area.top + oy + area.h * (1 - (v - s.lo) / (s.hi - s.lo));
-    const shift = full ? s.frac : 0;
-
-    const last = s.pts[n - 1];
-    const live = last + (s.next - last) * s.frac;
-    const hx = (n - 1 - shift + s.frac) * s.step + ox;
-    const hy = yOf(live);
-    const x0 = -shift * s.step + ox;
-
-    ctx.beginPath();
-    for (let i = 0; i < n; i++) {
-      const x = (i - shift) * s.step + ox;
-      const y = yOf(s.pts[i]);
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }
-    ctx.lineTo(hx, hy);
-    ctx.strokeStyle = rgba(VIOLET, s.alpha);
-    ctx.lineWidth = 1.5;
-    ctx.lineJoin = 'round';
-    ctx.stroke();
-
-    const floor = area.floor + oy;
-    ctx.lineTo(hx, floor);
-    ctx.lineTo(x0, floor);
-    ctx.closePath();
-    const g = ctx.createLinearGradient(0, area.top + oy, 0, floor);
-    g.addColorStop(0, rgba(VIOLET, s.alpha * 0.24));
-    g.addColorStop(1, rgba(VIOLET, 0));
-    ctx.fillStyle = g;
-    ctx.fill();
-
-    // Last-price guide, head marker, and readout.
-    ctx.beginPath();
-    ctx.setLineDash([2, 6]);
-    ctx.moveTo(hx + 6, hy + 0.5);
-    ctx.lineTo(W, hy + 0.5);
-    ctx.strokeStyle = rgba(VIOLET, s.alpha * 0.45);
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    const pulse = 0.5 + 0.5 * Math.sin(now * 3);
-    ctx.beginPath();
-    ctx.arc(hx, hy, 7 + pulse * 5, 0, Math.PI * 2);
-    ctx.fillStyle = rgba(VIOLET, s.alpha * 0.16);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(hx, hy, 2.6, 0, Math.PI * 2);
-    ctx.fillStyle = rgba(INK, Math.min(1, s.alpha * 1.6));
-    ctx.fill();
-
-    const change = (live / s.pts[0] - 1) * 100;
-    ctx.font = '11px ' + MONO;
-    ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = rgba(INK, Math.min(1, s.alpha * 1.2));
-    ctx.fillText(live.toFixed(2), hx + 12, hy - 9);
-    ctx.fillStyle = rgba(LAV, s.alpha);
-    ctx.fillText(signed(change, 2) + '%', hx + 12, hy + 16);
-  }
-
-  function updateCandles(s, dt) {
+  function updateChart(s, dt) {
     s.tick += dt;
     if (s.tick > 0.07) {
       s.tick = 0;
@@ -254,20 +182,52 @@
     trackRange(s, lo, hi, dt);
   }
 
-  function drawCandles(s) {
+  // One chart: candles, their moving average as a filled line, and a live
+  // marker on the latest price with its readouts.
+  const MA_WINDOW = 9;
+  function drawChart(s) {
     const n = s.bars.length;
     const full = n >= capacity(s);
-    const ox = offX(CHART_Z) - 40;
+    const ox = offX(CHART_Z) + layout.chartX - 40;
     const oy = offY(CHART_Z);
-    const area = plotArea(layout.candles);
+    const area = plotArea(layout.chart);
     const yOf = (v) => area.top + oy + area.h * (1 - (v - s.lo) / (s.hi - s.lo));
     const shift = full ? s.frac : 0;
+    const xOf = (i) => (i - shift) * s.step + ox;
     const bodyW = Math.max(3, s.step * 0.46);
 
+    // Moving average of the closes (over fewer bars at the very start).
+    const ma = new Array(n);
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+      sum += s.bars[i].c;
+      if (i >= MA_WINDOW) sum -= s.bars[i - MA_WINDOW].c;
+      ma[i] = sum / Math.min(i + 1, MA_WINDOW);
+    }
+    const tracePath = () => {
+      ctx.beginPath();
+      for (let i = 0; i < n; i++) {
+        if (i === 0) ctx.moveTo(xOf(i), yOf(ma[i])); else ctx.lineTo(xOf(i), yOf(ma[i]));
+      }
+    };
+
+    // Soft fill under the average.
+    const floor = area.floor + oy;
+    tracePath();
+    ctx.lineTo(xOf(n - 1), floor);
+    ctx.lineTo(xOf(0), floor);
+    ctx.closePath();
+    const g = ctx.createLinearGradient(0, area.top + oy, 0, floor);
+    g.addColorStop(0, rgba(VIOLET, s.alpha * 0.26));
+    g.addColorStop(1, rgba(VIOLET, 0));
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    // Candles.
     ctx.lineWidth = 1;
     for (let i = 0; i < n; i++) {
       const b = s.bars[i];
-      const x = Math.round((i - shift) * s.step + ox) + 0.5;
+      const x = Math.round(xOf(i)) + 0.5;
       const up = b.c >= b.o;
       const color = up ? UP : DOWN;
       const a = s.alpha * (up ? 0.85 : 1);
@@ -282,27 +242,65 @@
       ctx.fillRect(x - bodyW / 2, top, bodyW, height);
     }
 
-    // Moving average over the closes — one of the "calculations".
-    const WINDOW = 9;
-    if (n > WINDOW) {
-      let sum = 0;
-      ctx.beginPath();
-      for (let i = 0; i < n; i++) {
-        sum += s.bars[i].c;
-        if (i >= WINDOW) sum -= s.bars[i - WINDOW].c;
-        if (i < WINDOW - 1) continue;
-        const x = (i - shift) * s.step + ox;
-        const y = yOf(sum / WINDOW);
-        if (i === WINDOW - 1) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      }
-      ctx.strokeStyle = rgba(VIOLET, s.alpha * 1.1);
-      ctx.lineWidth = 1.25;
-      ctx.stroke();
+    // The average, drawn over the candles.
+    tracePath();
+    ctx.strokeStyle = rgba(VIOLET, s.alpha * 1.25);
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
 
-      const lx = (n - 1 - shift) * s.step + ox + 16;
-      ctx.font = LABEL_FONT;
-      ctx.fillStyle = rgba(VIOLET, Math.min(1, s.alpha * 1.6));
-      ctx.fillText('MA(' + WINDOW + ') ' + (sum / WINDOW).toFixed(2), lx, yOf(sum / WINDOW) - 6);
+    // Last-price guide, live marker, and readouts.
+    const live = s.bars[n - 1].c;
+    const hx = xOf(n - 1);
+    const hy = yOf(live);
+
+    ctx.beginPath();
+    ctx.setLineDash([2, 6]);
+    ctx.moveTo(hx + bodyW, hy + 0.5);
+    ctx.lineTo(W, hy + 0.5);
+    ctx.strokeStyle = rgba(VIOLET, s.alpha * 0.55);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const pulse = 0.5 + 0.5 * Math.sin(now * 3);
+    ctx.beginPath();
+    ctx.arc(hx, hy, 7 + pulse * 5, 0, Math.PI * 2);
+    ctx.fillStyle = rgba(VIOLET, s.alpha * 0.2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(hx, hy, 2.6, 0, Math.PI * 2);
+    ctx.fillStyle = rgba(INK, Math.min(1, s.alpha * 1.9));
+    ctx.fill();
+
+    const change = (live / s.bars[0].o - 1) * 100;
+    const tx = hx + bodyW + 10;
+    ctx.textBaseline = 'alphabetic';
+    ctx.font = '11px ' + MONO;
+    ctx.fillStyle = rgba(INK, Math.min(1, s.alpha * 1.5));
+    ctx.fillText(live.toFixed(2), tx, hy - 9);
+    ctx.fillStyle = rgba(LAV, s.alpha * 1.2);
+    ctx.fillText(signed(change, 2) + '%', tx, hy + 16);
+    ctx.font = LABEL_FONT;
+    ctx.fillStyle = rgba(VIOLET, Math.min(1, s.alpha * 1.6));
+    ctx.fillText('MA(' + MA_WINDOW + ') ' + ma[n - 1].toFixed(2), tx, hy + 31);
+
+    // In the split layout the chart dissolves toward the words on its left.
+    if (layout.split) {
+      const x0 = layout.chartX - 20;
+      const x1 = layout.chartX + W * 0.15;
+      const fade = ctx.createLinearGradient(x0, 0, x1, 0);
+      fade.addColorStop(0, 'rgba(0,0,0,1)');
+      fade.addColorStop(0.35, 'rgba(0,0,0,0.82)');
+      fade.addColorStop(0.7, 'rgba(0,0,0,0.3)');
+      fade.addColorStop(1, 'rgba(0,0,0,0)');
+      const alpha = ctx.globalAlpha;
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.fillStyle = fade;
+      ctx.fillRect(0, layout.chart.y + oy - 30, x1, layout.chart.h + 60);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = alpha;
     }
   }
 
@@ -320,9 +318,9 @@
     () => 'w=' + rand(0.01, 0.2).toFixed(3),
   ];
 
-  // Is this rectangle clear of both chart bands and every other figure?
+  // Is this rectangle clear of the chart's band and every other figure?
   function isFree(rect) {
-    if (rectsHit(rect, layout.line, PAD) || rectsHit(rect, layout.candles, PAD)) return false;
+    if (rectsHit(rect, layout.chart, PAD)) return false;
     for (let i = 0; i < clusters.length; i++) if (rectsHit(rect, clusters[i].rect, PAD)) return false;
     for (let i = 0; i < floaters.length; i++) if (rectsHit(rect, floaters[i].rect, PAD)) return false;
     return true;
@@ -330,11 +328,12 @@
 
   const wantedClusters = () => (compact ? 2 : Math.max(2, Math.min(5, Math.floor(layout.lane.w / 420))));
 
-  // Claim a free square in the lane between the two charts and plant a root.
-  function seedCluster() {
-    const lane = layout.lane;
-    const maxR = Math.min(compact ? 88 : 165, lane.h / 2, lane.w / 2);
-    const minR = Math.min(compact ? 56 : 90, maxR);
+  const mainClusters = () => clusters.reduce((k, c) => k + (c.pinned ? 0 : 1), 0);
+
+  // Claim a free square in a lane and plant a root there.
+  function seedCluster(lane, largest, smallest, pinned) {
+    const maxR = Math.min(largest, lane.h / 2, lane.w / 2);
+    const minR = Math.min(smallest, maxR);
     if (maxR < 40) return false;
     const TRIES = 14;
     for (let i = 0; i < TRIES; i++) {
@@ -345,6 +344,7 @@
       if (!isFree(rect)) continue;
       const c = {
         z: rand(0.6, 1),
+        pinned,
         cx, cy, R, rect,
         nodes: [],
         edges: [],
@@ -489,8 +489,9 @@
 
   function drawCluster(c) {
     const ox = offX(c.z);
-    const oy = offY(c.z);
-    const depth = (0.45 + 0.55 * c.z) * Math.max(0, c.alpha);
+    const oy = offY(c.z, c.pinned);
+    const depth = (0.45 + 0.55 * c.z) * Math.max(0, c.alpha) * (c.pinned ? pinnedAlpha() : 1);
+    if (depth <= 0.004) return;
     const px = (n) => n.x + Math.sin(now * 0.5 + n.phase) * 2 + ox;
     const py = (n) => n.y + Math.cos(now * 0.4 + n.phase) * 2 + oy;
 
@@ -605,7 +606,9 @@
   const floatFont = () => (compact ? 10 : 12) + 'px ' + MONO;
   let floaterIn = 0.4;
 
-  function spawnFloater() {
+  // `zone` is one of the small areas beside the words; without it the formula
+  // goes anywhere free on the figures' side.
+  function spawnFloater(zone) {
     const f = pick(FORMULAS);
     const first = f[1]();
     let second = Math.random() < 0.5 ? f[1]() : null;
@@ -614,19 +617,24 @@
     // Reserve room for the whole line up front, including a revised value.
     ctx.font = floatFont();
     const w = Math.ceil(ctx.measureText(f[0] + first + (second ? ' → ' + second : '')).width) + 8;
-    if (w > W - 14 - layout.left) return;
+    const x0 = zone ? zone.x : layout.left;
+    const x1 = (zone ? zone.x + zone.w : W - 14) - w;
+    const y0 = zone ? zone.y + 12 : layout.top + 12;
+    const y1 = zone ? zone.y + zone.h : layout.bottom;
+    if (x1 < x0 || y1 < y0) return;
 
     // Graphs get first claim on the lane while one is still waiting to be placed.
-    const laneReserved = clusters.length < wantedClusters();
+    const laneReserved = !zone && mainClusters() < wantedClusters();
     for (let i = 0; i < 10; i++) {
-      const x = rand(layout.left, W - 14 - w);
-      const y = rand(layout.top + 12, layout.bottom);
+      const x = rand(x0, x1);
+      const y = rand(y0, y1);
       const rect = { x, y: y - 12, w, h: 16 };
       if (laneReserved && rectsHit(rect, layout.lane, 0)) continue;
       if (!isFree(rect)) continue;
       const typed = f[0].length / TYPE_CPS;
       floaters.push({
         rect, x, y,
+        pinned: !!zone,
         text: f[0], first, second,
         born: now,
         typed,
@@ -636,28 +644,37 @@
     }
   }
 
+  let noteIn = 1.6;
   function updateFloaters(dt) {
+    let main = 0;
+    let note = 0;
+    for (let i = floaters.length - 1; i >= 0; i--) {
+      if (now - floaters[i].born > floaters[i].life) { floaters.splice(i, 1); continue; }
+      if (floaters[i].pinned) note++; else main++;
+    }
     floaterIn -= dt;
     if (floaterIn <= 0) {
       floaterIn = rand(0.4, 1);
-      if (floaters.length < (compact ? 5 : 9)) spawnFloater();
+      if (main < (compact ? 5 : layout.split ? 6 : 9)) spawnFloater(null);
     }
-    for (let i = floaters.length - 1; i >= 0; i--) {
-      if (now - floaters[i].born > floaters[i].life) floaters.splice(i, 1);
+    // One formula at a time beside the words.
+    if (layout.leftNote && note === 0) {
+      noteIn -= dt;
+      if (noteIn <= 0) { noteIn = rand(1.2, 2.6); spawnFloater(layout.leftNote); }
     }
   }
 
   function drawFloaters() {
     const ox = offX(FLOAT_Z);
-    const oy = offY(FLOAT_Z);
     ctx.font = floatFont();
     ctx.textBaseline = 'alphabetic';
     for (let i = 0; i < floaters.length; i++) {
       const f = floaters[i];
       const age = now - f.born;
-      const a = clamp01((f.life - age) / FADE);
+      const a = clamp01((f.life - age) / FADE) * (f.pinned ? pinnedAlpha() : 1);
+      if (a <= 0.004) continue;
       const x = f.x + ox;
-      const y = f.y + oy;
+      const y = f.y + offY(FLOAT_Z, f.pinned);
 
       const shown = f.text.slice(0, Math.floor(age * TYPE_CPS));
       ctx.fillStyle = rgba(LAV, 0.42 * a);
@@ -687,17 +704,13 @@
   /* ------------------------------------------------------------------ */
   /* Scene                                                              */
   /* ------------------------------------------------------------------ */
-  const line = {
-    pts: [100], next: 100.4, frac: 0, lo: 99, hi: 101,
-    step: 9, interval: 0.11, head: 0.84, headCompact: 0.76,
-    drift: 0.0006, vol: 0.011, alpha: 0.6,
-  };
-  const candles = {
+  const chart = {
     bars: [{ o: 100, h: 100, l: 100, c: 100 }], frac: 0, tick: 0, lo: 98, hi: 102,
-    step: 18, interval: 0.9, head: 0.9, headCompact: 0.7,
-    drift: 0, vol: 0.006, revert: 0.02, alpha: 0.42,
+    step: 20, interval: 0.8, head: 0.84, headCompact: 0.72,
+    drift: 0, vol: 0.006, revert: 0.02, alpha: 0.5,
   };
   let seedIn = 0;
+  let leftSeedIn = 1;
 
   // Carve the scene into the regions each kind of figure may use.
   function computeLayout() {
@@ -709,11 +722,28 @@
     const Hw = layout.h;
     layout.top = Math.max(84, Hw * 0.1);     // keeps figures clear of the header
     layout.bottom = Hw - 14;
-    layout.line = { x: -80, y: Hw * 0.17, w: W + 160, h: Hw * 0.16 };
-    layout.candles = { x: -80, y: Hw * 0.73, w: W + 160, h: Hw * 0.17 };
-    layout.left = W < window.innerWidth - 1 ? Math.round(W * 0.15) : 14;
-    const laneTop = Hw * 0.33 + PAD;
-    layout.lane = { x: layout.left, y: laneTop, w: W - 14 - layout.left, h: Hw * 0.73 - PAD - laneTop };
+    layout.split = sided && W >= 900;
+    layout.left = layout.split ? Math.round(W * 0.56) : 14;
+    layout.chartX = layout.split ? Math.round(W * 0.5) : 0;
+    layout.chart = {
+      x: layout.chartX - (layout.split ? 20 : 80), y: Hw * 0.14,
+      w: W - layout.chartX + 160, h: Hw * 0.25,
+    };
+    const laneTop = Hw * 0.39 + PAD;
+    layout.lane = { x: layout.left, y: laneTop, w: W - 14 - layout.left, h: Hw * 0.94 - laneTop };
+
+    // Beside the words: a strip above them for a formula and one below for a
+    // small graph. The words sit around the middle of the viewport.
+    layout.leftNote = null;
+    layout.leftLane = null;
+    if (layout.split) {
+      const x = Math.max(Math.min(64, W * 0.05), (W - 1240) / 2);
+      const mid = H / 2;
+      const noteTop = Math.max(layout.top, 104);
+      const laneY = mid + 128;
+      if (mid - 104 - noteTop >= 24) layout.leftNote = { x, y: noteTop, w: W * 0.4 - x, h: mid - 104 - noteTop };
+      if (H - 66 - laneY >= 96) layout.leftLane = { x, y: laneY, w: W * 0.42 - x, h: H - 66 - laneY };
+    }
   }
 
   function update(dt) {
@@ -721,16 +751,24 @@
     view.py += (view.ty - view.py) * Math.min(1, dt * 3);
     view.scroll += (view.scrollTarget - view.scroll) * Math.min(1, dt * 8);
 
-    updateLine(line, dt);
-    updateCandles(candles, dt);
+    updateChart(chart, dt);
 
+    let pinned = 0;
     for (let i = clusters.length - 1; i >= 0; i--) {
       updateCluster(clusters[i], dt);
       if (clusters[i].alpha <= 0) clusters.splice(i, 1);
+      else if (clusters[i].pinned) pinned++;
     }
-    if (clusters.length < wantedClusters()) {
+    if (clusters.length - pinned < wantedClusters()) {
       seedIn -= dt;
-      if (seedIn <= 0) seedIn = seedCluster() ? rand(0.5, 1.4) : 0.4;
+      if (seedIn <= 0) {
+        seedIn = seedCluster(layout.lane, compact ? 88 : 165, compact ? 56 : 90, false) ? rand(0.5, 1.4) : 0.4;
+      }
+    }
+    // One small graph at a time beside the words.
+    if (layout.leftLane && pinned === 0) {
+      leftSeedIn -= dt;
+      if (leftSeedIn <= 0) leftSeedIn = seedCluster(layout.leftLane, 86, 52, true) ? rand(1, 2.2) : 0.6;
     }
 
     updateFloaters(dt);
@@ -739,9 +777,8 @@
   function draw() {
     ctx.clearRect(0, 0, W, H);
     ctx.globalAlpha = intensity;
+    drawChart(chart);   // first: its left edge is faded by erasing, which must not touch the rest
     drawGrid();
-    drawLine(line);
-    drawCandles(candles);
     for (let i = 0; i < clusters.length; i++) drawCluster(clusters[i]);
     drawFloaters();
     ctx.globalAlpha = 1;
@@ -749,15 +786,14 @@
 
   function resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    // The canvas may cover only part of the window (the front page keeps it to one side).
-    const w = canvas.clientWidth || window.innerWidth;
-    const h = canvas.clientHeight || window.innerHeight;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
     // Phone browsers resize constantly as their toolbars slide; only a real
     // change of shape is worth re-planning the scene for.
     const replan = w !== layout.w || Math.abs(h + layout.shift - layout.h) > 120 || !layout.lane;
     W = w;
     H = h;
-    compact = window.innerWidth < 720;
+    compact = W < 720;
     canvas.width = Math.round(W * dpr);
     canvas.height = Math.round(H * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -772,20 +808,18 @@
     }
   }
 
-  // Give the charts some history up front so they are already part-way
-  // across the screen on load, then keep drawing themselves from there.
+  // Give the chart some history up front so it is already most of the way
+  // across on load, then keep drawing itself from there.
   function prefill() {
-    const points = Math.floor(capacity(line) * 0.45);
-    for (let i = 0; i < points; i++) { line.pts.push(line.next); line.next = nextPrice(line.next, line); }
-    const bars = Math.floor(capacity(candles) * 0.6);
+    const bars = Math.floor(capacity(chart) * 0.8);
     for (let i = 0; i < bars; i++) {
-      const b = candles.bars[candles.bars.length - 1];
-      for (let k = 0; k < 12; k++) {
-        b.c = nextPrice(b.c, candles);
+      const b = chart.bars[chart.bars.length - 1];
+      for (let k = 0; k < 11; k++) {
+        b.c = nextPrice(b.c, chart);
         if (b.c > b.h) b.h = b.c;
         if (b.c < b.l) b.l = b.c;
       }
-      candles.bars.push({ o: b.c, h: b.c, l: b.c, c: b.c });
+      chart.bars.push({ o: b.c, h: b.c, l: b.c, c: b.c });
     }
   }
 
@@ -821,8 +855,8 @@
   }
 
   window.addEventListener('pointermove', (e) => {
-    view.tx = e.clientX / window.innerWidth - 0.5;
-    view.ty = e.clientY / window.innerHeight - 0.5;
+    view.tx = e.clientX / W - 0.5;
+    view.ty = e.clientY / H - 0.5;
   }, { passive: true });
   window.addEventListener('scroll', () => {
     view.scrollTarget = window.scrollY;

@@ -18,6 +18,7 @@
   --chip: rgba(0, 0, 0, 0.35);
   --glow-a: rgba(107, 79, 194, 0.22);
   --glow-b: rgba(63, 37, 133, 0.2);
+  --glow-c: rgba(107, 79, 194, 0.07);    /* wash between the words and the figures */
   --btn-bg: #f5f2f8;
   --btn-fg: #0b0812;
   --btn-hover: #d3c4fa;
@@ -55,6 +56,7 @@
   --chip: rgba(255, 255, 255, 0.6);
   --glow-a: rgba(154, 123, 232, 0.16);
   --glow-b: rgba(211, 196, 250, 0.3);
+  --glow-c: rgba(211, 196, 250, 0.16);
   --btn-bg: #14101f;
   --btn-fg: #ffffff;
   --btn-hover: #6b4fc2;
@@ -341,12 +343,17 @@ em {
 
 /* ---------- Front page, wide screens: words on the left, figures on the right ---------- */
 @media (min-width: 900px) {
-  .page-home .bg {
-    left: 54%; right: 0; width: 46%;
-    -webkit-mask-image: linear-gradient(to right, transparent, #000 15%);
-    mask-image: linear-gradient(to right, transparent, #000 15%);
+  /* A wide, soft wash across the middle joins the two halves of the page. */
+  .page-home {
+    background:
+      radial-gradient(60% 50% at 88% 0%, var(--glow-a), transparent 70%),
+      radial-gradient(45% 40% at 0% 100%, var(--glow-b), transparent 70%),
+      radial-gradient(55% 70% at 46% 58%, var(--glow-c), transparent 72%),
+      var(--bg);
+    background-attachment: fixed;
   }
-  /* Nothing sits behind the words any more, so only the edge fades remain. */
+  /* js/background.js (data-side on the canvas) keeps the figures to the right;
+     nothing sits behind the words, so only the edge fades remain. */
   .page-home .scrim {
     background: linear-gradient(to bottom, rgba(var(--bg-rgb), 0.55), transparent 20%, transparent 82%, rgba(var(--bg-rgb), 0.6));
   }
