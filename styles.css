@@ -28,6 +28,8 @@
   --field: rgba(245, 242, 248, 0.04);
   --field-line: rgba(211, 196, 250, 0.18);
   --field-line-hover: rgba(211, 196, 250, 0.34);
+  --nv-tint: rgba(118, 185, 0, 0.1);     /* NVIDIA green, kept faint behind its logo */
+  --nv-line: rgba(118, 185, 0, 0.38);
 
   --font: "Schibsted Grotesk", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
@@ -66,6 +68,8 @@
   --field: rgba(63, 37, 133, 0.03);
   --field-line: rgba(63, 37, 133, 0.2);
   --field-line-hover: rgba(63, 37, 133, 0.4);
+  --nv-tint: rgba(118, 185, 0, 0.07);
+  --nv-line: rgba(118, 185, 0, 0.5);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -207,7 +211,6 @@ em {
   box-shadow: 0 0 0 6px rgba(154, 123, 232, 0.18), 0 10px 40px rgba(154, 123, 232, 0.35);
 }
 .btn:active { transform: scale(0.98); }
-.btn--sm { gap: 8px; padding: 10px 17px; font-size: 13.5px; }
 .btn__arrow { transition: transform 0.25s var(--ease); }
 .btn:hover .btn__arrow { transform: translateX(4px); }
 
@@ -261,7 +264,25 @@ em {
   transition-delay: calc(var(--i, 0) * 25ms);
 }
 
-.hero__foot { margin-top: clamp(26px, 4.6vh, 48px); }
+.hero__foot {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px;
+  margin-top: clamp(26px, 4.6vh, 48px);
+}
+/* NVIDIA Inception membership: a small pill with a faint green tint.
+   NVIDIA's logo rules: use the supplied artwork as it is, with good contrast,
+   keep its clear space, and add no effects. So the pill has a solid backing
+   (the tint is laid over the page colour and kept faint), the logo is sized by
+   its own artboard, whose margins are the required clear space, and it gets no
+   filter, shadow, opacity or transform. The words keep the program's own
+   capitalisation, so no text-transform. */
+.membership {
+  display: inline-flex; align-items: center;
+  padding: 0 20px;
+  border: 1px solid var(--nv-line); border-radius: 999px;
+  background: linear-gradient(var(--nv-tint), var(--nv-tint)), var(--bg);
+  font-size: 13.5px; font-weight: 500; line-height: 1; color: var(--ink); white-space: nowrap;
+}
+.membership__logo { height: 44px; width: auto; max-width: none; flex: none; }
 
 .scroll-cue {
   position: absolute; left: var(--gutter); bottom: 28px;
@@ -435,6 +456,11 @@ em {
   font: 500 12px/1 var(--mono); letter-spacing: 0.08em; color: var(--mute);
 }
 .site-footer a { text-decoration: none; }
+.site-footer { flex-wrap: wrap; }
+.site-footer__legal {
+  flex-basis: 100%;
+  font: 400 11px/1.5 var(--font); letter-spacing: 0; color: var(--dim);
+}
 .site-footer a:hover { color: var(--accent); }
 
 /* ---------- Small screens ---------- */
