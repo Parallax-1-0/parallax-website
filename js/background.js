@@ -740,8 +740,8 @@
       const x = Math.max(Math.min(64, W * 0.05), (W - 1240) / 2);
       const mid = H / 2;
       const noteTop = Math.max(layout.top, 104);
-      const laneY = mid + 150;
-      if (mid - 120 - noteTop >= 24) layout.leftNote = { x, y: noteTop, w: W * 0.4 - x, h: mid - 120 - noteTop };
+      const laneY = mid + 165;
+      if (mid - 135 - noteTop >= 24) layout.leftNote = { x, y: noteTop, w: W * 0.4 - x, h: mid - 135 - noteTop };
       if (H - 66 - laneY >= 96) layout.leftLane = { x, y: laneY, w: W * 0.42 - x, h: H - 66 - laneY };
     }
   }
