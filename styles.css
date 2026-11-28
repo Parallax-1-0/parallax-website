@@ -28,6 +28,7 @@
   --field: rgba(245, 242, 248, 0.04);
   --field-line: rgba(211, 196, 250, 0.18);
   --field-line-hover: rgba(211, 196, 250, 0.34);
+  --wick: rgba(211, 196, 250, 0.5);
 
   --font: "Schibsted Grotesk", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
@@ -66,6 +67,7 @@
   --field: rgba(63, 37, 133, 0.03);
   --field-line: rgba(63, 37, 133, 0.2);
   --field-line-hover: rgba(63, 37, 133, 0.4);
+  --wick: rgba(63, 37, 133, 0.45);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -298,13 +300,38 @@ em {
   font: 500 12px/1 var(--mono); letter-spacing: 0.18em; text-transform: uppercase;
   color: var(--mute);
 }
+/* Each item is drawn as a horizontal candlestick: a thin wick for its full
+   range and a thick body for its core, stepping to the right from one item to
+   the next. --w0/--w1 and --b0/--b1 (set per item in the HTML) are where the
+   wick and the body start and end; --draw (0 to 1) is how much is drawn. */
 .statements__list li {
-  display: grid; grid-template-columns: clamp(48px, 8vw, 110px) 1fr; align-items: baseline;
-  padding: clamp(18px, 4vh, 44px) 0;
-  border-top: 1px solid var(--hair);
+  display: grid; grid-template-columns: clamp(48px, 8vw, 110px) 1fr; align-items: start;
+  padding: clamp(12px, 2.6vh, 28px) 0;
 }
-.statements__list li:last-child { border-bottom: 1px solid var(--hair); }
-.statements__num { font: 500 13px/1 var(--mono); letter-spacing: 0.1em; color: var(--violet); }
+.statements__num { font: 500 13px/18px var(--mono); letter-spacing: 0.1em; color: var(--violet); }
+.candle { position: relative; display: block; height: 18px; margin-bottom: clamp(10px, 1.8vh, 16px); }
+.candle__wick, .candle__body {
+  position: absolute;
+  transform: scaleX(var(--draw, 1)); transform-origin: left center;
+}
+.candle__wick {
+  top: 4px; bottom: 4px;
+  left: var(--w0); width: calc(var(--w1) - var(--w0));
+  /* the line itself, with a short cap at each end */
+  background:
+    linear-gradient(var(--wick), var(--wick)) left center / 100% 1px no-repeat,
+    linear-gradient(var(--wick), var(--wick)) left center / 1px 100% no-repeat,
+    linear-gradient(var(--wick), var(--wick)) right center / 1px 100% no-repeat;
+}
+.candle__body {
+  top: 1px; bottom: 1px;
+  left: var(--b0); width: calc(var(--b1) - var(--b0));
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--grad-a), var(--grad-b));
+}
+.js [data-reveal] .candle__wick { transition: transform 0.9s var(--ease) 0.1s; }
+.js [data-reveal] .candle__body { transition: transform 0.9s var(--ease) 0.3s; }
+.js [data-reveal]:not(.is-visible) { --draw: 0; }
 .statements__list h3 {
   margin: 0;
   font-size: clamp(1.4rem, 3.1vw, 2.5rem);
@@ -351,6 +378,7 @@ em {
 .zoom-on .zoom__stage > section:not(:first-child) { opacity: 0; visibility: hidden; }
 .zoom-on .zoom [data-reveal] { opacity: 1; transform: none; transition: none; }
 .zoom-on .zoom .statements__list li { will-change: transform, opacity; }
+.zoom-on .zoom .candle i { transition: none; }   /* js/site.js draws them with the scroll */
 .zoom-on .bg { transform-origin: 50% 50%; }
 
 /* ---------- Front page, wide screens: words on the left, figures on the right ---------- */
@@ -473,6 +501,8 @@ em {
   .phrase.is-active .word__inner { opacity: 1; transition: opacity 0.5s ease; transition-delay: 0s; }
   .phrase.is-leaving .word__inner { opacity: 0; transition: opacity 0.3s ease; transition-delay: 0s; }
   .js [data-reveal] { opacity: 1; transform: none; transition: none; }
+  .js [data-reveal]:not(.is-visible) { --draw: 1; }
+  .js [data-reveal] .candle i { transition: none; }
   .scroll-cue i { animation: none; }
   .brand__word, .brand__mark { transition-duration: 0.01s; }
 }

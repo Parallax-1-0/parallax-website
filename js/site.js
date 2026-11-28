@@ -197,6 +197,8 @@
           const e = easeOut(clamp01(entered * 1.5 - k * 0.18));
           item.style.transform = e === 1 ? 'none' : 'translateY(' + ((mid - k) * ITEM_SPREAD * (1 - e)).toFixed(1) + 'px)';
           item.style.opacity = e.toFixed(3);
+          // Its candlestick draws itself out as the item arrives.
+          item.style.setProperty('--draw', easeOut(clamp01(entered * 1.25 - k * 0.14)).toFixed(3));
         });
       });
 
@@ -212,7 +214,9 @@
     const clearStyles = () => {
       panels.forEach((panel) => {
         ['transform', 'opacity', 'visibility', 'pointerEvents'].forEach((prop) => { panel.style[prop] = ''; });
-        panel._items.forEach((item) => { item.style.transform = ''; item.style.opacity = ''; });
+        panel._items.forEach((item) => {
+          item.style.transform = ''; item.style.opacity = ''; item.style.removeProperty('--draw');
+        });
       });
       if (backdrop) backdrop.style.transform = '';
     };
